@@ -1,0 +1,14 @@
+# Compiled binaries
+wordcount
+*.exe
+
+# Test and benchmark outputs
+*.test
+*.out
+coverage.out
+
+# IDE settings
+.vscode/
+
+# Temporary files
+*.tmp

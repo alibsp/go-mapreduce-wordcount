@@ -1,0 +1,7 @@
+Hello world
+Hello Go
+Go is fast
+Go is powerful
+World of Go
+I am Programmer
+I want write first go program ali
