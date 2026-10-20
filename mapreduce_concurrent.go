@@ -2,11 +2,50 @@ package main
 
 import (
 	"fmt"
+	"hash/fnv"
 	"os"
+	"sort"
 	"strings"
+	"unicode"
 )
 
-func MapWorker(id int, text string, ch chan<- []KeyValue) {
+type KeyValue struct {
+	Key   string
+	Value int
+}
+
+func Map(text string) []KeyValue {
+	//words := strings.Fields(text)
+	//result := make([]KeyValue, 0, len(words))
+	words := strings.FieldsFunc(text, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsPunct(r)
+	})
+	result := make([]KeyValue, 0)
+	for _, word := range words {
+		word = strings.ToLower(word)
+		// Remove punctuation from the beginning and end.
+		/*word = strings.TrimFunc(word, unicode.IsPunct)
+
+		// Skip empty words.
+		if word == "" {
+			continue
+		}*/
+
+		result = append(result, KeyValue{
+			Key: word, Value: 1,
+		})
+	}
+	return result
+}
+
+func MapWorker(id int, filename string, ch chan<- []KeyValue) {
+	data, err := os.ReadFile(filename)
+	text := ""
+	if err != nil {
+		fmt.Println("Error read file:", filename, ", error:", err)
+	} else {
+		text = string(data)
+	}
 	result := Map(text)
 	ch <- result
 }
@@ -17,125 +56,96 @@ func ShuffleInto(grouped map[string][]int, data []KeyValue) {
 	}
 }
 
-func RunConcurrent_method1(text string, workers int) map[string]int {
-	words := strings.Fields(text)
+func Partition(key string, nReduce int) int {
+	h := fnv.New32a()
+	h.Write([]byte(key))
 
-	result := make(map[string]int)
-
-	if len(words) == 0 {
-		return result
-	}
-
-	if workers < 1 {
-		workers = 1
-	}
-
-	if workers > len(words) {
-		workers = len(words)
-	}
-
-	// Step 1: Create input partitions.
-	inputs := make([]string, workers)
-
-	for i := 0; i < workers; i++ {
-		start := i * len(words) / workers
-		end := (i + 1) * len(words) / workers
-
-		inputs[i] = strings.Join(words[start:end], " ")
-		//fmt.Println("input part ", i, ":", inputs[i])
-	}
-
-	// Step 2: Create the channel.
-	ch := make(chan []KeyValue)
-
-	// Step 3: Start Mapper workers.
-	for id, input := range inputs {
-		go MapWorker(id, input, ch)
-	}
-
-	// Step 4: Collect all Mapper results.
-	var mapped []KeyValue
-
-	for i := 0; i < workers; i++ {
-		workerResult := <-ch
-		mapped = append(mapped, workerResult...)
-	}
-
-	// Step 5: Shuffle.
-	shuffled := Shuffle(mapped)
-
-	// Step 6: Reduce.
-	result = Reduce(shuffled)
-
-	return result
+	return int(h.Sum32() % uint32(nReduce))
 }
 
-func RunConcurrent_method2(text string, workers int) map[string]int {
-	words := strings.Fields(text)
+func Reduce(values []int) int {
+	sum := 0
+	for _, value := range values {
+		sum += value
+	}
+	return sum
+}
+
+func ReduceWorker(partition map[string][]int, ch chan<- KeyValue) {
+	for word, values := range partition {
+		sum := Reduce(values)
+		ch <- KeyValue{
+			Key:   word,
+			Value: sum,
+		}
+	}
+}
+
+func MapReduce_Concurrent(files []string, nReduce int) {
 
 	result := make(map[string]int)
-
-	if len(words) == 0 {
-		return result
-	}
-
-	if workers < 1 {
-		workers = 1
-	}
-
-	if workers > len(words) {
-		workers = len(words)
-	}
-
-	// Step 1: Create input partitions.
-	inputs := make([]string, workers)
-
-	for i := 0; i < workers; i++ {
-		start := i * len(words) / workers
-		end := (i + 1) * len(words) / workers
-
-		inputs[i] = strings.Join(words[start:end], " ")
-		//fmt.Println("input part ", i, ":", inputs[i])
-	}
 
 	// Step 2: Create the channel.
 	ch := make(chan []KeyValue)
 
 	// Step 3: Start Mapper workers.
-	for id, input := range inputs {
-		go MapWorker(id, input, ch)
+	for id, filename := range files {
+		go MapWorker(id, filename, ch)
 	}
 
-	// Step 4: Collect all Mapper results.
+	// Step 4: Collect all Mapper results and Shuffle
 
 	shuffled := make(map[string][]int)
 
-	for i := 0; i < workers; i++ {
+	for i := 0; i < len(files); i++ {
 		workerResult := <-ch
 		ShuffleInto(shuffled, workerResult)
 	}
 
-	// Step 5: Shuffle.
+	// Step 5: Partition keys using hash(key) % nReduce.
+	partitions := make([]map[string][]int, nReduce)
+	for i := 0; i < nReduce; i++ {
+		partitions[i] = make(map[string][]int)
+	}
+	for key, value := range shuffled {
+		partitionIndex := Partition(key, nReduce)
+		partitions[partitionIndex][key] = value
+	}
 
-	// Step 6: Reduce.
-	result = Reduce(shuffled)
+	// Step 6: Create a channel for Reduce results.
+	shuffled_len := len(shuffled)
+	reduceCh := make(chan KeyValue, shuffled_len)
 
-	return result
-}
+	// Step 7: Start one ReduceWorker per partition.
+	for i := 0; i < nReduce; i++ {
+		go ReduceWorker(partitions[i], reduceCh)
+	}
 
-func MapReduce_Concurrent(filename string) {
-	data, err := os.ReadFile(filename)
+	// Step 8: Collect all Reduce results.
+	for i := 0; i < shuffled_len; i++ {
+		kv := <-reduceCh
+		result[kv.Key] = kv.Value
+	}
+	// Step 9: Sort words alphabetically.
+	words := make([]string, 0, len(result))
+
+	for word := range result {
+		words = append(words, word)
+	}
+
+	sort.Strings(words)
+
+	// Step 10: Write results to output.txt.
+	outputFile, err := os.Create("output.txt")
 	if err != nil {
-		fmt.Println("Error read file:", err)
+		fmt.Println("Error creating output.txt:", err)
 		return
 	}
-	text := string(data)
-	//result := RunConcurrent_method1(text, 5)
-	result := RunConcurrent_method2(text, 5)
+	defer outputFile.Close()
 
-	fmt.Println("MapReduce Results:")
-
-	for word, count := range result {
-		fmt.Println(word, count)
+	for _, word := range words {
+		fmt.Fprintf(outputFile, "%s: %d\n", word, result[word])
 	}
+
+	fmt.Println("MapReduce outpu is ready.")
 }
