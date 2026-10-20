@@ -1,184 +1,107 @@
-# Go MapReduce Word Count
+# Concurrent MapReduce Word Count in Go
 
-A hands-on exercise in Go to understand the MapReduce programming model by implementing a word-count algorithm.
+A small educational implementation of the **MapReduce** programming model in Go. It counts words across multiple text files and uses goroutines and channels to coordinate the Map, Shuffle/Group, and Reduce stages.
 
-The exercise starts with a sequential implementation and explores concurrent processing using goroutines and channels.
+## Features
 
-## Overview
+- Processes multiple input files using concurrent Mapper goroutines.
+- Normalizes words to lowercase, so `Go` and `go` are counted together.
+- Splits text on whitespace and punctuation, including hyphens (`-`) and repeated hyphens (`--`).
+- Groups intermediate values by word during Shuffle/Group.
+- Assigns each word to one of `nReduce` partitions using `hash(key) % nReduce`.
+- Runs one Reduce worker goroutine per partition.
+- Collects final counts through a channel.
+- Uses Go's standard library; no third-party dependencies are required for hashing or word tokenization.
 
-MapReduce is a programming model for processing data through three main stages:
+## How It Works
 
-- **Map:** Splits the input text into words and emits key-value pairs.
-- **Shuffle:** Groups values associated with the same key.
-- **Reduce:** Aggregates the grouped values to calculate the final word counts.
-
-This exercise implements these stages in Go and compares sequential and concurrent execution.
-
-## Architecture
-
-The processing pipeline consists of three stages:
-
-```text
-          Input Text
-               |
-               v
-             Map
-               |
-               v
-            Shuffle
-               |
-               v
-             Reduce
-               |
-               v
-         Word Frequencies
-```
-
-### Map
-
-Splits the input text into words and emits a `KeyValue` pair for each word.
-
-Example:
-
-```text
-Input:  "Go is great Go"
-Output: (go, 1), (is, 1), (great, 1), (go, 1)
-```
-
-### Shuffle
-
-Groups values by their keys.
-
-Example:
-
-```text
-(go, 1), (is, 1), (great, 1), (go, 1)
-```
-
-becomes:
-
-```text
-go    -> [1, 1]
-is    -> [1]
-great -> [1]
-```
-
-### Reduce
-
-Aggregates the values for each key to produce the final word counts.
-
-Example:
-
-```text
-go    -> 2
-is    -> 1
-great -> 1
-```
-
-## Implementations
-
-This exercise explores the following approaches:
-
-### 1. Sequential MapReduce
-
-Executes Map, Shuffle, and Reduce sequentially in a single goroutine.
-
-### 2. Concurrent MapReduce — Method 1
-
-- Splits the input text into partitions.
-- Runs multiple Mapper workers using goroutines.
-- Transfers worker results through a channel.
-- Collects all mapped key-value pairs in an intermediate slice.
-- Executes Shuffle and Reduce after mapping is complete.
-
-### 3. Concurrent MapReduce — Method 2
-
-- Splits the input text into partitions.
-- Runs multiple Mapper workers using goroutines.
-- Transfers worker results through a channel.
-- Groups each worker's results immediately after receiving them.
-- Executes Reduce after all mapping results have been processed.
-
-Method 2 avoids storing all raw mapped pairs in an additional intermediate slice.
-
-**Note:** Both concurrent methods currently operate within a single process and on a single machine. They are concurrent implementations, not distributed MapReduce systems.
+1. **Map:** Each `MapWorker` reads one input file and emits a `KeyValue` pair for every word, such as `{"hello", 1}`.
+2. **Shuffle/Group:** The intermediate pairs from all Mapper workers are grouped by word. For example, `hello → [1, 1, 1]`.
+3. **Partition:** Each word is assigned to a partition using `hash(key) % nReduce`. A given word always maps to the same partition for the chosen hash function and partition count.
+4. **Reduce:** One `ReduceWorker` goroutine is started for each partition. It sums the values associated with each word and sends a final `KeyValue` result through a channel.
+5. **Collect:** The main workflow receives the final results and stores them in a `map[string]int`.
 
 ## Requirements
 
-- Go
+- Go installed on your machine.
+- One or more readable text files to use as input.
 
-## Getting Started
+The implementation uses Go's standard library, including `hash/fnv`, `os`, `strings`, and `unicode`.
 
-Clone the repository:
+## Usage
 
-```bash
-git clone https://github.com/YOUR_USERNAME/go-mapreduce-wordcount.git
-cd go-mapreduce-wordcount
+Set the input file paths and the number of Reduce partitions in your `main` function, then call `MapReduce_Concurrent`. For example:
+
+```go
+func main() {
+    files := []string{
+        "input1.txt",
+        "input2.txt",
+        "input3.txt",
+    }
+
+    nReduce := 3
+    MapReduce_Concurrent(files, nReduce)
+}
 ```
 
-Run the program:
+The filenames above are examples; replace them with paths to files that exist in your project. If your project already has a `main` function, update it rather than adding a second one.
+
+From the project root, run:
 
 ```bash
 go run .
 ```
 
-Replace `YOUR_USERNAME` with your GitHub username.
+This command assumes the project is configured as a Go module. `nReduce` must be greater than zero.
 
-If the program processes an input file, make sure the file exists at the path expected by the application.
+## Example
 
-## Performance Comparison
+Suppose the input files collectively contain:
 
-The exercise includes a basic timing comparison between sequential and concurrent execution.
+```text
+Hello, world!
+hello Go
+GO-world
+```
 
-The comparison checks that both implementations produce identical results and measures their execution times.
+After lowercasing and splitting on punctuation, the expected counts are:
 
-Performance depends on several factors, including:
+```text
+go 2
+hello 2
+world 2
+```
 
-- Input size
-- Number of Mapper workers
-- Goroutine scheduling overhead
-- Memory allocation and garbage collection
-- CPU resources
+The order of printed words is not guaranteed in the current implementation because Go map iteration order is unspecified.
 
-For small inputs, concurrent execution may be slower than sequential execution because of its additional overhead.
+## Main Functions and Types
 
-A more reliable performance evaluation should use repeated measurements or Go benchmarks.
+| Function / Type | Responsibility |
+|---|---|
+| `KeyValue` | Represents a word and its intermediate or final count. |
+| `Map` | Tokenizes text and emits one key-value pair per word. |
+| `MapWorker` | Reads an input file and runs the Map stage. |
+| `ShuffleInto` | Groups intermediate values by word. |
+| `Partition` | Maps a word to a partition using a hash function. |
+| `Reduce` | Sums the values for one word. |
+| `ReduceWorker` | Reduces all words in one partition and sends results through a channel. |
+| `RunConcurrent_method2` | Coordinates the Map, Shuffle/Group, Partition, and Reduce stages. |
+| `MapReduce_Concurrent` | Runs the workflow and prints the resulting counts. |
 
-## Current Limitations
+## Current Limitations / Possible Improvements
 
-- The entire input file is read into memory.
-- Input partitioning is performed before Mapper workers start.
-- Shuffle and Reduce run in the main goroutine.
-- Worker communication uses an in-process channel.
-- Word normalization currently converts words to lowercase but does not remove punctuation.
-- The current implementation does not distribute work across multiple machines.
-
-## Future Improvements
-
-Possible extensions include:
-
-- Reading large files in chunks.
-- Handling word boundaries when partitioning files.
-- Improving memory efficiency.
-- Benchmarking different numbers of Mapper workers.
-- Implementing concurrent Reduce workers.
-- Partitioning keys across multiple Reducers.
-- Exploring inter-process communication and network-based workers.
-- Extending the implementation toward distributed MapReduce.
+- If an input file cannot be read, `MapWorker` prints an error and sends an empty result. A future version could propagate errors to the caller instead.
+- The current implementation prints results to the terminal. Writing alphabetically sorted results to `output.txt` is a possible next step and is not implemented in the current code shown here.
+- To print results in alphabetical order, collect the keys from the result map and sort them with `sort.Strings` before printing.
+- All punctuation is treated as a delimiter. For example, `don't` is tokenized as `don` and `t`.
 
 ## Learning Goals
 
-The main goals of this exercise are to:
+This project is intended to practice:
 
-- Understand the MapReduce programming model.
-- Practice working with slices and maps in Go.
-- Learn how to use goroutines and channels.
-- Compare sequential and concurrent processing.
-- Explore performance and memory trade-offs.
-- Build a foundation for studying distributed data processing.
-
-## License
-
-This project is available under the MIT License.
-
-If you choose the MIT License, add a `LICENSE` file containing the appropriate license text.
+- Goroutines and concurrent task execution.
+- Channels for communication between goroutines.
+- The MapReduce workflow: Map, Shuffle/Group, and Reduce.
+- Hash-based partitioning.
+- Collecting results from concurrent workers.
