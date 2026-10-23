@@ -119,6 +119,14 @@ func MapReduce_Concurrent(files []string, nReduce int) {
 		partitionIndex := Partition(key, nReduce)
 		partitions[partitionIndex][key] = value
 	}
+	/*
+		// My method for balanced distribution (Round-Robin)
+		partitionIndex := 0
+		for key, value := range shuffled {
+			partitions[partitionIndex][key] = value
+			partitionIndex = (partitionIndex + 1) % nReduce
+		}
+	*/
 
 	// Step 6: Create a channel for Reduce results.
 	shuffled_len := len(shuffled)
