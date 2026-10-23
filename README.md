@@ -86,8 +86,7 @@ The order of printed words is not guaranteed in the current implementation becau
 | `Partition` | Maps a word to a partition using a hash function. |
 | `Reduce` | Sums the values for one word. |
 | `ReduceWorker` | Reduces all words in one partition and sends results through a channel. |
-| `RunConcurrent_method2` | Coordinates the Map, Shuffle/Group, Partition, and Reduce stages. |
-| `MapReduce_Concurrent` | Runs the workflow and prints the resulting counts. |
+| `MapReduce_Concurrent` | Coordinates the Map, Shuffle/Group, Partition, and Reduce stages.. |
 
 ## Current Limitations / Possible Improvements
 
